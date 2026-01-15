@@ -1,80 +1,85 @@
-# I am a workflow that demonstrates how to output the different context objects
+name: PR - Build / Test
 
-name: Variables and Context
-
-# Controls when the action will run. Workflow runs when manually triggered using the UI
-# or API.
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
-    # Inputs the workflow accepts.
-    inputs:
-      name:
-        # Friendly description to be shown in the UI instead of 'name'
-        description: 'Person to greet'
-        # Default value if no value is explicitly provided
-        default: 'World'
-        # Input has to be provided for the workflow to run
-        required: true
 
-env:
-  VAR1: myworkflowvar1
-  VAR2: myworkflowvar2
-  VAR3: myworkflowvar3
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
+  build:
+    runs-on: ubuntu-latest
 
-  job1:
-    runs-on: ubuntu-latest 
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - name: Dump GitHub context
+
+      - name: Start Build Indicator
         env:
-          GITHUB_CONTEXT: ${{ toJSON(github) }}
-        run: echo "$GITHUB_CONTEXT"
-      
-  #step/job output variables
-  job2:
-    runs-on: ubuntu-latest
-    
-    outputs:
-      output1: ${{ steps.step1.outputs.step1value }}
-      output2: ${{ steps.step2.outputs.step2value }}
-    
-    steps:
-      - name: Step 1
-        id: step1
-        # run: echo "::set-output name=step1value::hello"
-        run: echo "step1value=hello" >> $GITHUB_OUTPUT
+          LIFX_BULB_LOCATION: ${{ vars.LIFX_BULB_LOCATION }}
+          LIFX_TOKEN: ${{ secrets.LIFX_TOKEN }}
+        run: |
+          curl -X POST "https://api.lifx.com/v1/lights/$LIFX_BULB_LOCATION/effects/breathe" \
+            -H "Authorization: Bearer $LIFX_TOKEN" \
+            -d 'color=blue' \
+            -d 'period=4' \
+            -d 'cycles=450' \
+            -d 'from_color=pink'
+        
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Step 2
-        id: step2
-        # run: echo "::set-output name=step2value::world"
-        run: echo "step2value=world" >> $GITHUB_OUTPUT
-  
-  job3:
-    runs-on: ubuntu-latest
-    needs: job2
-    steps:
-      - run: echo ${{needs.job2.outputs.output1}} ${{needs.job2.outputs.output2}}
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v4.1.0
+        with:
+          dotnet-version: "8.0.x"
 
-  # access/set env variables
-  job4:
-    runs-on: ubuntu-latest
-    env:
-      VAR2: myjobvar2
-      VAR3: myjobvar3
-    steps:
+      - name: Restore dependencies
+        run: dotnet restore "${{github.workspace}}/src/my-web-app.sln"
 
-      - run: |
-          echo $VAR1
-          echo ${{env.VAR1}}
+      - name: Build
+        run: dotnet build "${{github.workspace}}/src/my-web-app.sln"  --no-restore --configuration Release
 
-          echo ""
+      - name: Test
+        run: dotnet test "${{github.workspace}}/src/my-web-app.sln" --no-restore --logger:"junit;LogFilePath=${{ github.workspace }}/results/test-results.xml"
 
-          echo $VAR2
+      # create a test summary markdown file
+      # if you don't specify an output file, it will automatically add
+      # as a job summary. If you specify an output file, you have to
+      # create your own step of adding it to the job summary. I am
+      # intentionally doing that to show job summaries
+      - name: Create test summary
+        uses: test-summary/action@v2.4
+        with:
+          paths: ${{ github.workspace }}/results/*.xml
+          output: ${{ github.workspace }}/results/summary.md
+          show: "all"
+        if: always()
 
-          echo $VAR3
-        env: 
-          VAR3: mystepvar3
+      # I am adding the test results to the Job Summary
+      - name: Add Test Results To Job Summary
+        run: |
+          echo "TEST RESULTS:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY # this is a blank line
+          cat "${{ github.workspace }}/results/summary.md" >> $GITHUB_STEP_SUMMARY
+        if: always()
+
+      - name: Publish
+        run: dotnet publish "${{github.workspace}}/src/my-web-app/my-web-app.csproj" -c Release -o mywebapp
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myapp
+          path: mywebapp/**
+          if-no-files-found: error
+
+      - name: Final build status indicator
+        if: success()
+        run: | 
+          curl -X POST "https://api.lifx.com/v1/lights/${{ vars.LIFX_BULB_LOCATION }}/effects/off" -H "Authorization: Bearer ${{ secrets.LIFX_TOKEN }}" -d 'power_off=false'
+          curl -X PUT "https://api.lifx.com/v1/lights/${{ vars.LIFX_BULB_LOCATION }}/state" -H "Authorization: Bearer ${{ secrets.LIFX_TOKEN }}" -d 'color=green'
+        
+      - name: Final build status indicator
+        if: failure()
+        run: | 
+          curl -X POST "https://api.lifx.com/v1/lights/${{ vars.LIFX_BULB_LOCATION }}/effects/off" -H "Authorization: Bearer ${{ secrets.LIFX_TOKEN }}" -d 'power_off=false'
+          curl -X PUT "https://api.lifx.com/v1/lights/${{ vars.LIFX_BULB_LOCATION }}/state" -H "Authorization: Bearer ${{ secrets.LIFX_TOKEN }}" -d 'color=red'
