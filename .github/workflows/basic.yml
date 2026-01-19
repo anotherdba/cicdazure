@@ -3,9 +3,9 @@ name: Push Default and Deploy
 on:
   workflow_dispatch:
 
-permissions:
-  id-token: write
-  contents: read
+# permissions:
+#   id-token: write
+#   contents: read
 
 jobs:
   build-and-test:
