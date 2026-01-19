@@ -4,9 +4,6 @@
 name: Build and deploy ASP.Net Core app to Azure Web App - medwebapp
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
@@ -52,4 +49,5 @@ jobs:
           app-name: 'medwebapp'
           slot-name: 'Production'
           package: .
+
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_124FB1E7D0E049959E676997AF0D2F8A }}
